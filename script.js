@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', async () => {
-    // --- STATE --- (No changes here)
-    let savedPaperIds = JSON.parse(localStorage.getItem('paperPinSavedIds')) || [];
-    let builderPaperIds = JSON.parse(localStorage.getItem('paperPinBuilderIds')) || []; // Persist builder too
+    // --- STATE ---
+    let savedItems = JSON.parse(localStorage.getItem('paperPinSavedItems')) || []; // New structure
+    let builderItems = JSON.parse(localStorage.getItem('paperPinBuilderItems')) || []; // New structure
     let allPapersData = [];
     let currentlyDisplayedExplorePapersCount = 0;
     const papersPerLoad = 10;
@@ -10,7 +10,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let currentPaperForPassagesId = null;
     let currentPassageTextForRelated = null;
 
-    // --- DOM ELEMENTS --- (No changes here)
+    // --- DOM ELEMENTS --- (Same)
     const exploreTabButton = document.getElementById('exploreTabButton');
     const savedTabButton = document.getElementById('savedTabButton');
     const exploreView = document.getElementById('exploreView');
@@ -20,28 +20,41 @@ document.addEventListener('DOMContentLoaded', async () => {
     const explorePassageColumn = document.getElementById('explorePassageColumn');
     const exploreRelatedColumn = document.getElementById('exploreRelatedColumn');
 
-    const savedPapersColumn = document.getElementById('savedPapersColumn');
+    const savedPapersColumn = document.getElementById('savedPapersColumn'); // Will now be savedItemsColumn
     const savedBuilderColumn = document.getElementById('savedBuilderColumn');
     const savedSuggestionsColumn = document.getElementById('savedSuggestionsColumn');
 
-    // --- DATA LOADING --- (No changes here)
+    // --- UTILITY FUNCTIONS ---
+    function isItemEqual(item1, item2) {
+        if (!item1 || !item2 || item1.type !== item2.type) return false;
+        if (item1.type === 'paper') {
+            return item1.paperId === item2.paperId;
+        }
+        if (item1.type === 'passage') {
+            return item1.paperId === item2.paperId && item1.passageText === item2.passageText;
+        }
+        return false;
+    }
+
+    function findItemIndex(itemList, itemToFind) {
+        return itemList.findIndex(item => isItemEqual(item, itemToFind));
+    }
+
+    // --- DATA LOADING --- (Same)
     async function loadPaperData() {
         try {
             const response = await fetch('papers.json');
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             allPapersData = await response.json();
-            console.log("Paper data loaded:", allPapersData.length, "papers");
         } catch (error) {
             console.error("Could not load paper data:", error);
-            exploreFeedColumn.innerHTML = '<h3>Explore Feed</h3><div class="placeholder">Error loading papers. Please check papers.json and console.</div>';
+            exploreFeedColumn.innerHTML = '<h3>Explore Feed</h3><div class="placeholder">Error loading papers.</div>';
             allPapersData = [];
         }
     }
 
     // --- RENDERING FUNCTIONS ---
-
-    // createPaperCard (No changes needed in this function itself for this request)
-    function createPaperCard(paper, context) {
+    function createPaperCard(paper, context, itemType = 'paper') { // itemType for save button context
         const card = document.createElement('article');
         card.className = 'card paper-card';
         card.dataset.paperId = paper.id;
@@ -62,12 +75,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const actions = document.createElement('div');
         actions.className = 'actions';
 
-        const isSaved = savedPaperIds.includes(paper.id);
+        const itemToSave = { type: 'paper', paperId: paper.id };
+        const isSaved = findItemIndex(savedItems, itemToSave) !== -1;
         const saveButton = document.createElement('button');
         saveButton.className = 'save-toggle';
-        saveButton.textContent = isSaved ? 'Saved' : 'Save';
+        saveButton.textContent = isSaved ? 'Saved' : 'Save Paper';
         if (isSaved) saveButton.classList.add('saved');
-        saveButton.onclick = (e) => { e.stopPropagation(); toggleSavePaper(paper.id); };
+        saveButton.onclick = (e) => { e.stopPropagation(); toggleSaveItem(itemToSave); };
         actions.appendChild(saveButton);
 
         if (context === 'explore-feed' || context === 'explore-related' || context === 'saved-suggestion') {
@@ -83,11 +97,77 @@ document.addEventListener('DOMContentLoaded', async () => {
             });
         }
 
+        // Buttons for "Saved Items" list (when it's a full paper)
+        if (context === 'saved-list' && itemType === 'paper') {
+            const addButton = document.createElement('button');
+            addButton.className = 'add-to-builder';
+            addButton.textContent = 'Add Paper →';
+            addButton.onclick = (e) => { e.stopPropagation(); addItemToBuilder(itemToSave); };
+            actions.appendChild(addButton);
+            // Remove button is handled by toggleSaveItem, already present
+        }
+        
+        // Buttons for "Builder" list (when it's a full paper)
+        if (context === 'builder-list' && itemType === 'paper') {
+            const upButton = document.createElement('button');
+            upButton.className = 'reorder-up';
+            upButton.textContent = '↑';
+            upButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(itemToSave, -1); };
+            actions.appendChild(upButton);
+
+            const downButton = document.createElement('button');
+            downButton.className = 'reorder-down';
+            downButton.textContent = '↓';
+            downButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(itemToSave, 1); };
+            actions.appendChild(downButton);
+
+            const removeButton = document.createElement('button'); // This removes from builder
+            removeButton.className = 'remove-from-builder';
+            removeButton.textContent = '×';
+            removeButton.onclick = (e) => { e.stopPropagation(); removeItemFromBuilder(itemToSave); };
+            actions.appendChild(removeButton);
+        }
+        card.appendChild(actions);
+        return card;
+    }
+
+    function createPassageSnippetCard(passageItem, context) {
+        const card = document.createElement('article');
+        card.className = 'card passage-snippet-card'; // New class for styling if needed
+        
+        const passageTextEl = document.createElement('p');
+        passageTextEl.textContent = `"${passageItem.passageText}"`;
+        passageTextEl.style.fontStyle = 'italic';
+        card.appendChild(passageTextEl);
+
+        const sourcePaper = allPapersData.find(p => p.id === passageItem.paperId);
+        if (sourcePaper) {
+            const sourceInfo = document.createElement('p');
+            sourceInfo.textContent = `From: ${sourcePaper.title}`;
+            sourceInfo.style.fontSize = '0.9em';
+            sourceInfo.style.color = '#586069';
+            card.appendChild(sourceInfo);
+        }
+
+        const actions = document.createElement('div');
+        actions.className = 'actions';
+
+        // Save/Unsave button for this specific passage
+        const isSaved = findItemIndex(savedItems, passageItem) !== -1;
+        const saveButton = document.createElement('button');
+        saveButton.className = 'save-toggle';
+        saveButton.textContent = isSaved ? 'Passage Saved' : 'Save Passage';
+        if (isSaved) saveButton.classList.add('saved');
+        // This specific save button for a snippet card in saved/builder list is effectively a "remove from saved"
+        saveButton.onclick = (e) => { e.stopPropagation(); toggleSaveItem(passageItem); };
+        actions.appendChild(saveButton);
+
+
         if (context === 'saved-list') {
             const addButton = document.createElement('button');
             addButton.className = 'add-to-builder';
-            addButton.textContent = 'Add →';
-            addButton.onclick = (e) => { e.stopPropagation(); addPaperToBuilder(paper.id); };
+            addButton.textContent = 'Add Passage →';
+            addButton.onclick = (e) => { e.stopPropagation(); addItemToBuilder(passageItem); };
             actions.appendChild(addButton);
         }
 
@@ -95,37 +175,27 @@ document.addEventListener('DOMContentLoaded', async () => {
             const upButton = document.createElement('button');
             upButton.className = 'reorder-up';
             upButton.textContent = '↑';
-            upButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(paper.id, -1); };
+            upButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(passageItem, -1); };
             actions.appendChild(upButton);
 
             const downButton = document.createElement('button');
             downButton.className = 'reorder-down';
             downButton.textContent = '↓';
-            downButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(paper.id, 1); };
+            downButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(passageItem, 1); };
             actions.appendChild(downButton);
 
             const removeButton = document.createElement('button');
             removeButton.className = 'remove-from-builder';
             removeButton.textContent = '×';
-            removeButton.onclick = (e) => { e.stopPropagation(); removePaperFromBuilder(paper.id); };
+            removeButton.onclick = (e) => { e.stopPropagation(); removeItemFromBuilder(passageItem); };
             actions.appendChild(removeButton);
         }
         card.appendChild(actions);
         return card;
     }
 
-    // renderColumn (No changes here)
-    function renderColumn(columnElement, title, items, cardCreatorFn, context, placeholderText) {
-        columnElement.innerHTML = `<h3>${title}</h3>`;
-        if (!items || items.length === 0) {
-            columnElement.innerHTML += `<div class="placeholder">${placeholderText}</div>`;
-            return;
-        }
-        items.forEach(item => columnElement.appendChild(cardCreatorFn(item, context)));
-    }
 
-    // renderExploreFeed (No changes here)
-    function renderExploreFeed() {
+    function renderExploreFeed() { /* ... same as before ... */
         const feedContainer = exploreFeedColumn;
         feedContainer.innerHTML = '<h3>Explore Feed</h3>';
 
@@ -151,7 +221,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    // **** MODIFIED renderPassages ****
     function renderPassages() {
         explorePassageColumn.innerHTML = '<h3>Paper Passages</h3>';
         if (!currentPaperForPassagesId) {
@@ -172,63 +241,53 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (!trimmedSentence) return;
 
             const passageCard = document.createElement('article');
-            passageCard.className = 'card passage-card';
-            // passageCard.textContent = trimmedSentence; // We'll add text and button separately
+            passageCard.className = 'card passage-card'; // Existing class
 
-            const passageText = document.createElement('p');
-            passageText.textContent = trimmedSentence;
-            passageText.style.marginBottom = '10px'; // Add some space before the button
-
-            passageCard.appendChild(passageText);
-
-            // Add Save button for the parent paper
+            const passageTextEl = document.createElement('p');
+            passageTextEl.textContent = trimmedSentence;
+            passageTextEl.style.marginBottom = '10px';
+            passageCard.appendChild(passageTextEl);
+            
             const actionsDiv = document.createElement('div');
-            actionsDiv.className = 'actions'; // Use existing 'actions' class for styling consistency
+            actionsDiv.className = 'actions';
 
-            const isParentPaperSaved = savedPaperIds.includes(paper.id);
-            const saveButton = document.createElement('button');
-            saveButton.className = 'save-toggle'; // Use existing class for styling
-            saveButton.textContent = isParentPaperSaved ? 'Saved' : 'Save Paper'; // Clarify it saves the paper
-            if (isParentPaperSaved) saveButton.classList.add('saved');
-
-            saveButton.onclick = (e) => {
-                e.stopPropagation(); // Prevent passage click event if any
-                toggleSavePaper(paper.id); // Save/Unsave the PARENT paper
-            };
-            actionsDiv.appendChild(saveButton);
+            const passageToSave = { type: 'passage', paperId: paper.id, passageText: trimmedSentence };
+            const isPassageSaved = findItemIndex(savedItems, passageToSave) !== -1;
+            const savePassageButton = document.createElement('button');
+            savePassageButton.className = 'save-toggle';
+            savePassageButton.textContent = isPassageSaved ? 'Passage Saved' : 'Save Passage';
+            if (isPassageSaved) savePassageButton.classList.add('saved');
+            savePassageButton.onclick = (e) => { e.stopPropagation(); toggleSaveItem(passageToSave); };
+            actionsDiv.appendChild(savePassageButton);
             passageCard.appendChild(actionsDiv);
 
-            // Click on passage text (excluding button) loads related papers
-            passageText.onclick = () => {
-                currentPassageTextForRelated = trimmedSentence;
-                refreshAll();
-            };
-             // Make the whole card clickable for related papers, but ensure button click is handled separately
             passageCard.addEventListener('click', function(event) {
-                if (event.target.closest('.actions button')) return; // Ignore clicks on action buttons
+                if (event.target.closest('.actions button')) return;
                  currentPassageTextForRelated = trimmedSentence;
                  refreshAll();
             });
-
-
             explorePassageColumn.appendChild(passageCard);
         });
     }
 
-    // renderRelatedPapers (No changes here)
-    function renderRelatedPapers() {
+    function renderRelatedPapers() { /* ... same as before, uses createPaperCard ... */
         exploreRelatedColumn.innerHTML = '<h3>Related Papers</h3>';
         if (!currentPassageTextForRelated) {
             exploreRelatedColumn.innerHTML += '<div class="placeholder">Click a passage to see related papers.</div>'; return;
         }
         const passageKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0, 5);
         const relatedPapers = getRelevantPapers(passageKeywords, [currentPaperForPassagesId], 10);
-        renderColumn(exploreRelatedColumn, 'Related Papers', relatedPapers, createPaperCard, 'explore-related', 'No related papers found for this passage.');
+        // Reuse renderColumn with createPaperCard for full papers
+        exploreRelatedColumn.innerHTML = '<h3>Related Papers</h3>'; // Clear before adding
+        if(relatedPapers.length === 0) {
+            exploreRelatedColumn.innerHTML += '<div class="placeholder">No related papers found for this passage.</div>';
+        } else {
+            relatedPapers.forEach(paper => exploreRelatedColumn.appendChild(createPaperCard(paper, 'explore-related')));
+        }
     }
-
-    // getRelevantPapers (No changes here)
-    function getRelevantPapers(baseKeywords, excludeIds, count) {
-        const candidates = allPapersData.filter(p => !excludeIds.includes(p.id));
+    
+    function getRelevantPapers(baseKeywords, excludePaperIds, count) { /* ... same as before ... */
+        const candidates = allPapersData.filter(p => !excludePaperIds.includes(p.id));
         if (candidates.length === 0) return [];
 
         const scoredPapers = candidates.map(paper => {
@@ -257,100 +316,147 @@ document.addEventListener('DOMContentLoaded', async () => {
         return results.slice(0, count);
     }
 
-    // renderSavedPapersList (No changes here)
-    function renderSavedPapersList() {
-        const papers = savedPaperIds.map(id => allPapersData.find(p => p.id === id)).filter(Boolean);
-        renderColumn(savedPapersColumn, 'Saved Papers', papers, createPaperCard, 'saved-list', 'No papers saved yet.');
+
+    function renderSavedItemsList() { // Renamed and updated
+        savedPapersColumn.innerHTML = '<h3>Saved Items</h3>'; // Changed title
+        if (savedItems.length === 0) {
+            savedPapersColumn.innerHTML += '<div class="placeholder">No items saved yet.</div>'; return;
+        }
+        // Saved items are added to the end, so they are chronological by save time.
+        // To display newest first, iterate in reverse or reverse the array copy before iterating.
+        // For now, default chronological:
+        savedItems.forEach(item => {
+            if (item.type === 'paper') {
+                const paperData = allPapersData.find(p => p.id === item.paperId);
+                if (paperData) {
+                    savedPapersColumn.appendChild(createPaperCard(paperData, 'saved-list', 'paper'));
+                }
+            } else if (item.type === 'passage') {
+                savedPapersColumn.appendChild(createPassageSnippetCard(item, 'saved-list'));
+            }
+        });
     }
 
-    // renderBuilderList (No changes here)
-    function renderBuilderList() {
-        const papers = builderPaperIds.map(id => allPapersData.find(p => p.id === id)).filter(Boolean);
-        renderColumn(savedBuilderColumn, 'Builder', papers, createPaperCard, 'builder-list', 'Add papers from your saved list.');
+    function renderBuilderList() { // Updated
+        savedBuilderColumn.innerHTML = '<h3>Builder</h3>';
+        if (builderItems.length === 0) {
+            savedBuilderColumn.innerHTML += '<div class="placeholder">Add items from your saved list.</div>';
+            renderLiveSuggestions(); // Still call suggestions
+            return;
+        }
+        builderItems.forEach(item => {
+            if (item.type === 'paper') {
+                const paperData = allPapersData.find(p => p.id === item.paperId);
+                if (paperData) {
+                    savedBuilderColumn.appendChild(createPaperCard(paperData, 'builder-list', 'paper'));
+                }
+            } else if (item.type === 'passage') {
+                savedBuilderColumn.appendChild(createPassageSnippetCard(item, 'builder-list'));
+            }
+        });
         renderLiveSuggestions();
     }
 
-    // renderLiveSuggestions (No changes here)
-    function renderLiveSuggestions() {
+    function renderLiveSuggestions() { /* ... (logic might need slight adjustment if suggestions depend on passage content vs full paper content in builder) ... */
         savedSuggestionsColumn.innerHTML = '<h3>Live Suggestions</h3>';
         let suggestionKeywords = [];
-        if (builderPaperIds.length > 0) {
-            const lastBuilderPaperId = builderPaperIds[builderPaperIds.length - 1];
-            const lastPaper = allPapersData.find(p => p.id === lastBuilderPaperId);
-            if (lastPaper) {
-                suggestionKeywords.push(...(lastPaper.keywords || []));
-                suggestionKeywords.push(...lastPaper.title.toLowerCase().split(/\s+/).filter(kw => kw.length > 3));
-            }
-        } else {
-             if (activeTab === 'explore' && currentPassageTextForRelated) {
-                 suggestionKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0,5);
-             } else {
-                savedSuggestionsColumn.innerHTML += '<div class="placeholder">Add to builder or explore passages for suggestions.</div>'; return;
+        let contextItem = null;
+
+        if (builderItems.length > 0) {
+            contextItem = builderItems[builderItems.length - 1];
+        } else if (activeTab === 'explore' && currentPassageTextForRelated) {
+            // If builder is empty but exploring a passage, use that passage for context
+             const sourcePaper = allPapersData.find(p => p.id === currentPaperForPassagesId);
+             if(sourcePaper) {
+                contextItem = { type: 'passage', paperId: currentPaperForPassagesId, passageText: currentPassageTextForRelated, sourceTitle: sourcePaper.title };
              }
         }
-        if(suggestionKeywords.length === 0 && !(activeTab === 'explore' && currentPassageTextForRelated)) { // Avoid placeholder if there's passage context
-             savedSuggestionsColumn.innerHTML += '<div class="placeholder">Not enough context for suggestions.</div>'; return;
+
+        if (contextItem) {
+            if (contextItem.type === 'paper') {
+                const paper = allPapersData.find(p => p.id === contextItem.paperId);
+                if (paper) {
+                    suggestionKeywords.push(...(paper.keywords || []));
+                    suggestionKeywords.push(...paper.title.toLowerCase().split(/\s+/).filter(kw => kw.length > 3));
+                }
+            } else if (contextItem.type === 'passage') {
+                suggestionKeywords.push(...contextItem.passageText.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0,5));
+                 if(contextItem.sourceTitle) { // If we added sourceTitle to passage item
+                    suggestionKeywords.push(...contextItem.sourceTitle.toLowerCase().split(/\s+/).filter(kw => kw.length > 3));
+                 }
+            }
         }
 
-        const excludeIds = [...savedPaperIds, ...builderPaperIds, currentPaperForPassagesId].filter(Boolean);
-        const suggestedPapers = getRelevantPapers([...new Set(suggestionKeywords)], excludeIds, 5);
-        renderColumn(savedSuggestionsColumn, 'Live Suggestions', suggestedPapers, createPaperCard, 'saved-suggestion', 'No new suggestions found.');
-    }
+        if (suggestionKeywords.length === 0) {
+            savedSuggestionsColumn.innerHTML += '<div class="placeholder">Not enough context for suggestions.</div>'; return;
+        }
+        
+        const excludePaperIds = [...new Set(savedItems.map(i => i.paperId)), ...new Set(builderItems.map(i => i.paperId))];
+        if (currentPaperForPassagesId) excludePaperIds.push(currentPaperForPassagesId);
 
-
-    // --- STATE MUTATION & ACTIONS --- (No changes needed in these functions for this request)
-    function updateLocalStorage() {
-        localStorage.setItem('paperPinSavedIds', JSON.stringify(savedPaperIds));
-        localStorage.setItem('paperPinBuilderIds', JSON.stringify(builderPaperIds));
-    }
-
-    function toggleSavePaper(paperId) {
-        const index = savedPaperIds.indexOf(paperId);
-        if (index > -1) {
-            savedPaperIds.splice(index, 1);
-            const builderIndex = builderPaperIds.indexOf(paperId);
-            if (builderIndex > -1) builderPaperIds.splice(builderIndex, 1);
+        const suggestedPapers = getRelevantPapers([...new Set(suggestionKeywords)], [...new Set(excludePaperIds)], 5);
+        // Suggestions are always full papers for simplicity here
+        if(suggestedPapers.length === 0) {
+            savedSuggestionsColumn.innerHTML += '<div class="placeholder">No new suggestions found.</div>';
         } else {
-            savedPaperIds.push(paperId); // Chronological save
-        }
-        updateLocalStorage();
-        refreshAll(); // This will re-render passages and update their save button states
-    }
-
-    function addPaperToBuilder(paperId) {
-        if (!builderPaperIds.includes(paperId)) {
-            builderPaperIds.push(paperId);
-            updateLocalStorage();
-            refreshAll();
+             suggestedPapers.forEach(paper => savedSuggestionsColumn.appendChild(createPaperCard(paper, 'saved-suggestion')));
         }
     }
 
-    function removePaperFromBuilder(paperId) {
-        const index = builderPaperIds.indexOf(paperId);
+    // --- STATE MUTATION & ACTIONS ---
+    function updateLocalStorage() {
+        localStorage.setItem('paperPinSavedItems', JSON.stringify(savedItems));
+        localStorage.setItem('paperPinBuilderItems', JSON.stringify(builderItems));
+    }
+
+    function toggleSaveItem(itemToToggle) { // Updated
+        const index = findItemIndex(savedItems, itemToToggle);
         if (index > -1) {
-            builderPaperIds.splice(index, 1);
-            updateLocalStorage();
-            refreshAll();
+            savedItems.splice(index, 1); // Unsave
+            // If unsaving, also remove from builder if it was there
+            const builderIndex = findItemIndex(builderItems, itemToToggle);
+            if (builderIndex > -1) builderItems.splice(builderIndex, 1);
+        } else {
+            savedItems.push(itemToToggle); // Save (chronological)
         }
-    }
-
-    function moveBuilderItem(paperId, direction) {
-        const index = builderPaperIds.indexOf(paperId);
-        if (index === -1) return;
-        const newIndex = index + direction;
-        if (newIndex < 0 || newIndex >= builderPaperIds.length) return;
-        [builderPaperIds[index], builderPaperIds[newIndex]] = [builderPaperIds[newIndex], builderPaperIds[index]];
         updateLocalStorage();
         refreshAll();
     }
 
-    function loadMoreExplorePapers() {
+    function addItemToBuilder(itemToAdd) { // Updated
+        if (findItemIndex(builderItems, itemToAdd) === -1) {
+            builderItems.push(itemToAdd);
+            updateLocalStorage();
+            refreshAll();
+        }
+    }
+
+    function removeItemFromBuilder(itemToRemove) { // Updated
+        const index = findItemIndex(builderItems, itemToRemove);
+        if (index > -1) {
+            builderItems.splice(index, 1);
+            updateLocalStorage();
+            refreshAll();
+        }
+    }
+
+    function moveBuilderItem(itemToMove, direction) { // Updated
+        const index = findItemIndex(builderItems, itemToMove);
+        if (index === -1) return;
+        const newIndex = index + direction;
+        if (newIndex < 0 || newIndex >= builderItems.length) return;
+        [builderItems[index], builderItems[newIndex]] = [builderItems[newIndex], builderItems[index]];
+        updateLocalStorage();
+        refreshAll();
+    }
+
+    function loadMoreExplorePapers() { /* ... same as before ... */
         if (currentlyDisplayedExplorePapersCount >= allPapersData.length) return;
         currentlyDisplayedExplorePapersCount = Math.min(allPapersData.length, currentlyDisplayedExplorePapersCount + papersPerLoad);
         renderExploreFeed();
     }
 
-    // --- TAB SWITCHING --- (No changes here)
+    // --- TAB SWITCHING --- (Same)
     function switchTab(tabName, initialPaperIdForExplore = null) {
         activeTab = tabName;
         exploreView.style.display = (tabName === 'explore') ? 'flex' : 'none';
@@ -367,19 +473,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         refreshAll();
     }
 
-    // --- `refreshAll()` --- (No changes here)
-    function refreshAll() {
+    // --- `refreshAll()` ---
+    function refreshAll() { // Updated to call new render function
         if (activeTab === 'explore') {
             renderExploreFeed();
-            renderPassages(); // This will now update save buttons on passages
+            renderPassages();
             renderRelatedPapers();
-        } else { 
-            renderSavedPapersList();
-            renderBuilderList(); 
+        } else {
+            renderSavedItemsList(); // Changed from renderSavedPapersList
+            renderBuilderList();
         }
     }
 
-    // --- EVENT LISTENERS --- (No changes here)
+    // --- EVENT LISTENERS --- (Same)
     exploreTabButton.onclick = () => switchTab('explore');
     savedTabButton.onclick = () => switchTab('saved');
 
@@ -391,7 +497,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // --- INITIALIZATION --- (No changes here)
+    // --- INITIALIZATION --- (Same)
     async function initializeApp() {
         await loadPaperData();
         if (allPapersData && allPapersData.length > 0) {
@@ -399,6 +505,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
         switchTab('explore');
     }
+
+    initializeApp();
+});
 
     initializeApp();
 });
