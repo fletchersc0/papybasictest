@@ -1,16 +1,16 @@
 document.addEventListener('DOMContentLoaded', async () => {
-    // --- STATE ---
+    // --- STATE --- (No changes here)
     let savedPaperIds = JSON.parse(localStorage.getItem('paperPinSavedIds')) || [];
     let builderPaperIds = JSON.parse(localStorage.getItem('paperPinBuilderIds')) || []; // Persist builder too
     let allPapersData = [];
     let currentlyDisplayedExplorePapersCount = 0;
-    const papersPerLoad = 10; // Adjusted for potentially longer full texts
+    const papersPerLoad = 10;
     let activeTab = 'explore';
 
     let currentPaperForPassagesId = null;
     let currentPassageTextForRelated = null;
 
-    // --- DOM ELEMENTS ---
+    // --- DOM ELEMENTS --- (No changes here)
     const exploreTabButton = document.getElementById('exploreTabButton');
     const savedTabButton = document.getElementById('savedTabButton');
     const exploreView = document.getElementById('exploreView');
@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const savedBuilderColumn = document.getElementById('savedBuilderColumn');
     const savedSuggestionsColumn = document.getElementById('savedSuggestionsColumn');
 
-    // --- DATA LOADING ---
+    // --- DATA LOADING --- (No changes here)
     async function loadPaperData() {
         try {
             const response = await fetch('papers.json');
@@ -39,6 +39,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // --- RENDERING FUNCTIONS ---
+
+    // createPaperCard (No changes needed in this function itself for this request)
     function createPaperCard(paper, context) {
         const card = document.createElement('article');
         card.className = 'card paper-card';
@@ -68,16 +70,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         saveButton.onclick = (e) => { e.stopPropagation(); toggleSavePaper(paper.id); };
         actions.appendChild(saveButton);
 
-        // Card click to load passages (Explore Tab related contexts)
         if (context === 'explore-feed' || context === 'explore-related' || context === 'saved-suggestion') {
             card.addEventListener('click', function(event) {
-                if (event.target.closest('.actions button')) return; // Ignore clicks on action buttons
-                if (activeTab === 'explore') { // Only load passages if in explore tab
+                if (event.target.closest('.actions button')) return;
+                if (activeTab === 'explore') {
                     currentPaperForPassagesId = this.dataset.paperId;
-                    currentPassageTextForRelated = null; // Reset related when new paper is main focus
+                    currentPassageTextForRelated = null;
                     refreshAll();
                 } else if (activeTab === 'saved' && context === 'saved-suggestion') {
-                    // If a suggestion is clicked in saved tab, switch to explore and show it
                     switchTab('explore', this.dataset.paperId);
                 }
             });
@@ -114,6 +114,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         return card;
     }
 
+    // renderColumn (No changes here)
     function renderColumn(columnElement, title, items, cardCreatorFn, context, placeholderText) {
         columnElement.innerHTML = `<h3>${title}</h3>`;
         if (!items || items.length === 0) {
@@ -123,9 +124,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         items.forEach(item => columnElement.appendChild(cardCreatorFn(item, context)));
     }
 
+    // renderExploreFeed (No changes here)
     function renderExploreFeed() {
-        const feedContainer = exploreFeedColumn; // Direct reference
-        feedContainer.innerHTML = '<h3>Explore Feed</h3>'; // Clear previous, keep header
+        const feedContainer = exploreFeedColumn;
+        feedContainer.innerHTML = '<h3>Explore Feed</h3>';
 
         if (!allPapersData || allPapersData.length === 0) {
              feedContainer.innerHTML += '<div class="placeholder">No papers loaded. Check papers.json.</div>'; return;
@@ -149,6 +151,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    // **** MODIFIED renderPassages ****
     function renderPassages() {
         explorePassageColumn.innerHTML = '<h3>Paper Passages</h3>';
         if (!currentPaperForPassagesId) {
@@ -167,14 +170,63 @@ document.addEventListener('DOMContentLoaded', async () => {
         sentences.forEach(sentence => {
             const trimmedSentence = sentence.trim();
             if (!trimmedSentence) return;
+
             const passageCard = document.createElement('article');
             passageCard.className = 'card passage-card';
-            passageCard.textContent = trimmedSentence;
-            passageCard.onclick = () => { currentPassageTextForRelated = trimmedSentence; refreshAll(); };
+            // passageCard.textContent = trimmedSentence; // We'll add text and button separately
+
+            const passageText = document.createElement('p');
+            passageText.textContent = trimmedSentence;
+            passageText.style.marginBottom = '10px'; // Add some space before the button
+
+            passageCard.appendChild(passageText);
+
+            // Add Save button for the parent paper
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'actions'; // Use existing 'actions' class for styling consistency
+
+            const isParentPaperSaved = savedPaperIds.includes(paper.id);
+            const saveButton = document.createElement('button');
+            saveButton.className = 'save-toggle'; // Use existing class for styling
+            saveButton.textContent = isParentPaperSaved ? 'Saved' : 'Save Paper'; // Clarify it saves the paper
+            if (isParentPaperSaved) saveButton.classList.add('saved');
+
+            saveButton.onclick = (e) => {
+                e.stopPropagation(); // Prevent passage click event if any
+                toggleSavePaper(paper.id); // Save/Unsave the PARENT paper
+            };
+            actionsDiv.appendChild(saveButton);
+            passageCard.appendChild(actionsDiv);
+
+            // Click on passage text (excluding button) loads related papers
+            passageText.onclick = () => {
+                currentPassageTextForRelated = trimmedSentence;
+                refreshAll();
+            };
+             // Make the whole card clickable for related papers, but ensure button click is handled separately
+            passageCard.addEventListener('click', function(event) {
+                if (event.target.closest('.actions button')) return; // Ignore clicks on action buttons
+                 currentPassageTextForRelated = trimmedSentence;
+                 refreshAll();
+            });
+
+
             explorePassageColumn.appendChild(passageCard);
         });
     }
 
+    // renderRelatedPapers (No changes here)
+    function renderRelatedPapers() {
+        exploreRelatedColumn.innerHTML = '<h3>Related Papers</h3>';
+        if (!currentPassageTextForRelated) {
+            exploreRelatedColumn.innerHTML += '<div class="placeholder">Click a passage to see related papers.</div>'; return;
+        }
+        const passageKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0, 5);
+        const relatedPapers = getRelevantPapers(passageKeywords, [currentPaperForPassagesId], 10);
+        renderColumn(exploreRelatedColumn, 'Related Papers', relatedPapers, createPaperCard, 'explore-related', 'No related papers found for this passage.');
+    }
+
+    // getRelevantPapers (No changes here)
     function getRelevantPapers(baseKeywords, excludeIds, count) {
         const candidates = allPapersData.filter(p => !excludeIds.includes(p.id));
         if (candidates.length === 0) return [];
@@ -185,7 +237,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             baseKeywords.forEach(kw => {
                 if (paperText.includes(kw.toLowerCase())) score++;
             });
-            // Bonus for direct keyword matches
             (paper.keywords || []).forEach(pk => {
                 if (baseKeywords.some(bk => pk.toLowerCase().includes(bk.toLowerCase()))) score += 2;
             });
@@ -194,7 +245,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         let results = scoredPapers.map(item => item.paper);
         
-        // Fill with random if not enough scored results
         if (results.length < count) {
             const currentResultIds = results.map(r => r.id);
             const randomFill = candidates.filter(p => !currentResultIds.includes(p.id));
@@ -207,27 +257,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         return results.slice(0, count);
     }
 
-    function renderRelatedPapers() {
-        exploreRelatedColumn.innerHTML = '<h3>Related Papers</h3>';
-        if (!currentPassageTextForRelated) {
-            exploreRelatedColumn.innerHTML += '<div class="placeholder">Click a passage to see related papers.</div>'; return;
-        }
-        const passageKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0, 5);
-        const relatedPapers = getRelevantPapers(passageKeywords, [currentPaperForPassagesId], 10);
-        renderColumn(exploreRelatedColumn, 'Related Papers', relatedPapers, createPaperCard, 'explore-related', 'No related papers found for this passage.');
-    }
-
+    // renderSavedPapersList (No changes here)
     function renderSavedPapersList() {
         const papers = savedPaperIds.map(id => allPapersData.find(p => p.id === id)).filter(Boolean);
         renderColumn(savedPapersColumn, 'Saved Papers', papers, createPaperCard, 'saved-list', 'No papers saved yet.');
     }
 
+    // renderBuilderList (No changes here)
     function renderBuilderList() {
         const papers = builderPaperIds.map(id => allPapersData.find(p => p.id === id)).filter(Boolean);
         renderColumn(savedBuilderColumn, 'Builder', papers, createPaperCard, 'builder-list', 'Add papers from your saved list.');
-        renderLiveSuggestions(); // Update suggestions when builder changes
+        renderLiveSuggestions();
     }
 
+    // renderLiveSuggestions (No changes here)
     function renderLiveSuggestions() {
         savedSuggestionsColumn.innerHTML = '<h3>Live Suggestions</h3>';
         let suggestionKeywords = [];
@@ -238,14 +281,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 suggestionKeywords.push(...(lastPaper.keywords || []));
                 suggestionKeywords.push(...lastPaper.title.toLowerCase().split(/\s+/).filter(kw => kw.length > 3));
             }
-        } else { // If builder is empty, maybe use current passage if in explore?
+        } else {
              if (activeTab === 'explore' && currentPassageTextForRelated) {
                  suggestionKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0,5);
              } else {
                 savedSuggestionsColumn.innerHTML += '<div class="placeholder">Add to builder or explore passages for suggestions.</div>'; return;
              }
         }
-        if(suggestionKeywords.length === 0) {
+        if(suggestionKeywords.length === 0 && !(activeTab === 'explore' && currentPassageTextForRelated)) { // Avoid placeholder if there's passage context
              savedSuggestionsColumn.innerHTML += '<div class="placeholder">Not enough context for suggestions.</div>'; return;
         }
 
@@ -254,7 +297,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         renderColumn(savedSuggestionsColumn, 'Live Suggestions', suggestedPapers, createPaperCard, 'saved-suggestion', 'No new suggestions found.');
     }
 
-    // --- STATE MUTATION & ACTIONS ---
+
+    // --- STATE MUTATION & ACTIONS --- (No changes needed in these functions for this request)
     function updateLocalStorage() {
         localStorage.setItem('paperPinSavedIds', JSON.stringify(savedPaperIds));
         localStorage.setItem('paperPinBuilderIds', JSON.stringify(builderPaperIds));
@@ -264,13 +308,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         const index = savedPaperIds.indexOf(paperId);
         if (index > -1) {
             savedPaperIds.splice(index, 1);
-            const builderIndex = builderPaperIds.indexOf(paperId); // Also remove from builder if unsaved
+            const builderIndex = builderPaperIds.indexOf(paperId);
             if (builderIndex > -1) builderPaperIds.splice(builderIndex, 1);
         } else {
-            savedPaperIds.push(paperId);
+            savedPaperIds.push(paperId); // Chronological save
         }
         updateLocalStorage();
-        refreshAll();
+        refreshAll(); // This will re-render passages and update their save button states
     }
 
     function addPaperToBuilder(paperId) {
@@ -295,7 +339,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (index === -1) return;
         const newIndex = index + direction;
         if (newIndex < 0 || newIndex >= builderPaperIds.length) return;
-        [builderPaperIds[index], builderPaperIds[newIndex]] = [builderPaperIds[newIndex], builderPaperIds[index]]; // Swap
+        [builderPaperIds[index], builderPaperIds[newIndex]] = [builderPaperIds[newIndex], builderPaperIds[index]];
         updateLocalStorage();
         refreshAll();
     }
@@ -303,10 +347,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function loadMoreExplorePapers() {
         if (currentlyDisplayedExplorePapersCount >= allPapersData.length) return;
         currentlyDisplayedExplorePapersCount = Math.min(allPapersData.length, currentlyDisplayedExplorePapersCount + papersPerLoad);
-        renderExploreFeed(); // Only re-render the feed
+        renderExploreFeed();
     }
 
-    // --- TAB SWITCHING ---
+    // --- TAB SWITCHING --- (No changes here)
     function switchTab(tabName, initialPaperIdForExplore = null) {
         activeTab = tabName;
         exploreView.style.display = (tabName === 'explore') ? 'flex' : 'none';
@@ -314,7 +358,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         exploreTabButton.classList.toggle('active', tabName === 'explore');
         savedTabButton.classList.toggle('active', tabName === 'saved');
 
-        currentPassageTextForRelated = null; // Reset context
+        currentPassageTextForRelated = null;
         if (tabName === 'explore' && initialPaperIdForExplore) {
             currentPaperForPassagesId = initialPaperIdForExplore;
         } else {
@@ -323,19 +367,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         refreshAll();
     }
 
-    // --- `refreshAll()` ---
+    // --- `refreshAll()` --- (No changes here)
     function refreshAll() {
         if (activeTab === 'explore') {
             renderExploreFeed();
-            renderPassages();
+            renderPassages(); // This will now update save buttons on passages
             renderRelatedPapers();
-        } else { // 'saved'
+        } else { 
             renderSavedPapersList();
-            renderBuilderList(); // Includes call to renderLiveSuggestions
+            renderBuilderList(); 
         }
     }
 
-    // --- EVENT LISTENERS ---
+    // --- EVENT LISTENERS --- (No changes here)
     exploreTabButton.onclick = () => switchTab('explore');
     savedTabButton.onclick = () => switchTab('saved');
 
@@ -347,13 +391,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     });
 
-    // --- INITIALIZATION ---
+    // --- INITIALIZATION --- (No changes here)
     async function initializeApp() {
         await loadPaperData();
         if (allPapersData && allPapersData.length > 0) {
             currentlyDisplayedExplorePapersCount = Math.min(allPapersData.length, papersPerLoad);
         }
-        switchTab('explore'); // Default to explore tab
+        switchTab('explore');
     }
 
     initializeApp();
