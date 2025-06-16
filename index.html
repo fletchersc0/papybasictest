@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PaperPin</title>
+    <!-- Basic styling for layout - can be moved to style.css later -->
+    <style>
+        body { font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; }
+        header { padding: 10px; border-bottom: 1px solid #ccc; text-align: center; }
+        header button { padding: 5px 10px; margin: 0 5px; cursor: pointer; }
+        header button.active { text-decoration: underline; font-weight: bold; }
+        .main-content { display: flex; flex-grow: 1; overflow: hidden; }
+        .column { flex: 1; padding: 10px; border-right: 1px solid #eee; overflow-y: auto; }
+        .column:last-child { border-right: none; }
+        .card { border: 1px solid #ddd; padding: 10px; margin-bottom: 10px; background-color: #f9f9f9; }
+        .card h4 { margin-top: 0; }
+        .card .actions button { margin-right: 5px; }
+        .placeholder { color: #aaa; text-align: center; padding: 20px; }
+    </style>
+</head>
+<body>
+    <header>
+        <button id="exploreTabButton" class="active">Explore</button>
+        <button id="savedTabButton">Saved</button>
+    </header>
+
+    <main class="main-content">
+        <!-- Explore View (Default) -->
+        <div id="exploreView" class="main-content" style="width: 100%;">
+            <aside class="column" id="exploreFeedColumn">
+                <h3>Explore Feed</h3>
+                <!-- Paper cards will be dynamically inserted here -->
+                <div class="placeholder">Loading papers... (Infinite Scroll)</div>
+                <!-- Example Paper Card Structure (for script.js reference) -->
+                <!--
+                <article class="card paper-card" data-paper-id="demo1">
+                    <h4>Demo Paper Title 1</h4>
+                    <p>Authors: Dr. A, Dr. B</p>
+                    <p>Abstract snippet...</p>
+                    <div class="actions">
+                        <button class="save-toggle">Save</button>
+                    </div>
+                </article>
+                -->
+            </aside>
+            <section class="column" id="explorePassageColumn">
+                <h3>Paper Passages</h3>
+                <div class="placeholder">Click a paper on the left to see its passages.</div>
+                <!-- Passage cards will be dynamically inserted here -->
+                <!-- Example Passage Card Structure (for script.js reference) -->
+                <!--
+                <article class="card passage-card" data-passage-id="s1">
+                    <p>This is sentence one of the abstract.</p>
+                </article>
+                -->
+            </section>
+            <aside class="column" id="exploreRelatedColumn">
+                <h3>Related Papers</h3>
+                <div class="placeholder">Click a passage in the middle to see related papers.</div>
+                <!-- Related paper cards will be dynamically inserted here -->
+            </aside>
+        </div>
+
+        <!-- Saved View (Hidden by default) -->
+        <div id="savedView" class="main-content" style="display: none; width: 100%;">
+            <aside class="column" id="savedPapersColumn">
+                <h3>Saved Papers</h3>
+                <div class="placeholder">No papers saved yet.</div>
+                <!-- Saved paper cards will be dynamically inserted here -->
+                <!-- Example Saved Paper Card Structure (for script.js reference) -->
+                <!--
+                <article class="card paper-card saved-paper-card" data-paper-id="demo1">
+                    <h4>Demo Paper Title 1</h4>
+                    <p>Authors: Dr. A, Dr. B</p>
+                    <p>Abstract snippet...</p>
+                    <div class="actions">
+                        <button class="save-toggle saved">Saved</button>
+                        <button class="add-to-builder">Add →</button>
+                    </div>
+                </article>
+                -->
+            </aside>
+            <section class="column" id="savedBuilderColumn">
+                <h3>Builder</h3>
+                <div class="placeholder">Add papers from your saved list to the builder.</div>
+                <!-- Builder cards will be dynamically inserted here -->
+                <!-- Example Builder Card Structure (for script.js reference) -->
+                <!--
+                <article class="card paper-card builder-card" data-paper-id="demo1">
+                    <h4>Demo Paper Title 1</h4>
+                    <p>Authors: Dr. A, Dr. B</p>
+                    <div class="actions">
+                        <button class="reorder-up">↑</button>
+                        <button class="reorder-down">↓</button>
+                        <button class="remove-from-builder">×</button>
+                    </div>
+                </article>
+                -->
+            </section>
+            <aside class="column" id="savedSuggestionsColumn">
+                <h3>Live Suggestions</h3>
+                <div class="placeholder">Suggestions will appear here based on your builder list.</div>
+                <!-- Suggested paper cards will be dynamically inserted here -->
+            </aside>
+        </div>
+    </main>
+
+    <script src="script.js" defer></script>
+</body>
+</html>
