@@ -1,14 +1,14 @@
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     // --- STATE ---
     let savedPaperIds = JSON.parse(localStorage.getItem('paperPinSavedIds')) || [];
-    let builderPaperIds = []; // In-memory as per brief
-    let allDemoPapers = []; // To store all generated demo papers
+    let builderPaperIds = JSON.parse(localStorage.getItem('paperPinBuilderIds')) || []; // Persist builder too
+    let allPapersData = [];
     let currentlyDisplayedExplorePapersCount = 0;
-    const papersPerLoad = 20;
-    let activeTab = 'explore'; // 'explore' or 'saved'
+    const papersPerLoad = 10; // Adjusted for potentially longer full texts
+    let activeTab = 'explore';
 
-    let currentPaperForPassages = null; // ID of paper whose passages are shown
-    let currentPassageForRelated = null; // Text of passage whose related papers are shown
+    let currentPaperForPassagesId = null;
+    let currentPassageTextForRelated = null;
 
     // --- DOM ELEMENTS ---
     const exploreTabButton = document.getElementById('exploreTabButton');
@@ -16,61 +16,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const exploreView = document.getElementById('exploreView');
     const savedView = document.getElementById('savedView');
 
-    // Explore View Columns
     const exploreFeedColumn = document.getElementById('exploreFeedColumn');
     const explorePassageColumn = document.getElementById('explorePassageColumn');
     const exploreRelatedColumn = document.getElementById('exploreRelatedColumn');
 
-    // Saved View Columns
     const savedPapersColumn = document.getElementById('savedPapersColumn');
     const savedBuilderColumn = document.getElementById('savedBuilderColumn');
     const savedSuggestionsColumn = document.getElementById('savedSuggestionsColumn');
 
-    // --- DEMO DATA GENERATION ---
-    function generateDemoPaper(index) {
-        const titles = ["The Future of AI", "Quantum Entanglement Explained", "Climate Change Solutions", "Exploring Mars", "Deep Sea Discoveries", "Ancient Civilizations", "The Human Brain", "Blockchain Technology", "Renewable Energy Sources", "Genetic Engineering Advances"];
-        const authors = [
-            ["Dr. Ada Lovelace", "Dr. Alan Turing"], ["Prof. Marie Curie", "Dr. Albert Einstein"], ["Dr. Isaac Newton"],
-            ["Dr. Jane Goodall", "Prof. Stephen Hawking"], ["Dr. Galileo Galilei", "Dr. Nicolaus Copernicus"]
-        ];
-        const abstractSentences = [
-            "This paper explores groundbreaking research in its respective field.",
-            "We present a novel approach to understanding complex phenomena.",
-            "Our findings suggest significant implications for future studies.",
-            "Further investigation is required to fully validate these results.",
-            "The methodology employed combines theoretical models with empirical data.",
-            "A comprehensive review of existing literature is provided.",
-            "This study contributes to the growing body of knowledge on this topic.",
-            "We discuss the potential applications and limitations of our work."
-        ];
-
-        const title = titles[index % titles.length] + ` #${index + 1}`;
-        const paperAuthors = authors[index % authors.length];
-        // Create a 3-5 sentence abstract
-        let abstract = "";
-        const numSentences = 3 + (index % 3); // 3, 4, or 5 sentences
-        for (let i = 0; i < numSentences; i++) {
-            abstract += abstractSentences[(index + i) % abstractSentences.length] + " ";
-        }
-
-        return {
-            id: `demo${index}`,
-            title: title,
-            authors: paperAuthors,
-            abstract: abstract.trim(),
-            // fullText: `Full text for ${title} would go here, potentially much longer. ` + abstract // For now, abstract is fine
-        };
-    }
-
-    function initializeDemoPapers(count = 100) {
-        allDemoPapers = [];
-        for (let i = 0; i < count; i++) {
-            allDemoPapers.push(generateDemoPaper(i));
+    // --- DATA LOADING ---
+    async function loadPaperData() {
+        try {
+            const response = await fetch('papers.json');
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            allPapersData = await response.json();
+            console.log("Paper data loaded:", allPapersData.length, "papers");
+        } catch (error) {
+            console.error("Could not load paper data:", error);
+            exploreFeedColumn.innerHTML = '<h3>Explore Feed</h3><div class="placeholder">Error loading papers. Please check papers.json and console.</div>';
+            allPapersData = [];
         }
     }
 
     // --- RENDERING FUNCTIONS ---
-
     function createPaperCard(paper, context) {
         const card = document.createElement('article');
         card.className = 'card paper-card';
@@ -84,7 +52,7 @@ document.addEventListener('DOMContentLoaded', () => {
         authorsEl.textContent = `Authors: ${paper.authors.join(', ')}`;
         card.appendChild(authorsEl);
 
-        const abstractSnippet = paper.abstract.substring(0, 100) + (paper.abstract.length > 100 ? '...' : '');
+        const abstractSnippet = paper.abstract.substring(0, 120) + (paper.abstract.length > 120 ? '...' : '');
         const abstractEl = document.createElement('p');
         abstractEl.textContent = abstractSnippet;
         card.appendChild(abstractEl);
@@ -97,208 +65,219 @@ document.addEventListener('DOMContentLoaded', () => {
         saveButton.className = 'save-toggle';
         saveButton.textContent = isSaved ? 'Saved' : 'Save';
         if (isSaved) saveButton.classList.add('saved');
-        saveButton.onclick = () => toggleSavePaper(paper.id);
+        saveButton.onclick = (e) => { e.stopPropagation(); toggleSavePaper(paper.id); };
         actions.appendChild(saveButton);
 
-        if (context === 'explore-feed' || context === 'explore-related' || context === 'saved-suggestions') {
-            card.onclick = (e) => {
-                if (e.target === saveButton) return; // Don't trigger if save button was clicked
-                if (activeTab === 'explore') {
-                     currentPaperForPassages = paper.id;
-                     currentPassageForRelated = null; // Clear related when new paper is selected
-                     refreshAll();
+        // Card click to load passages (Explore Tab related contexts)
+        if (context === 'explore-feed' || context === 'explore-related' || context === 'saved-suggestion') {
+            card.addEventListener('click', function(event) {
+                if (event.target.closest('.actions button')) return; // Ignore clicks on action buttons
+                if (activeTab === 'explore') { // Only load passages if in explore tab
+                    currentPaperForPassagesId = this.dataset.paperId;
+                    currentPassageTextForRelated = null; // Reset related when new paper is main focus
+                    refreshAll();
+                } else if (activeTab === 'saved' && context === 'saved-suggestion') {
+                    // If a suggestion is clicked in saved tab, switch to explore and show it
+                    switchTab('explore', this.dataset.paperId);
                 }
-                // No action on click for saved-suggestions or explore-related in this context
-                // (Passage loading is only from explore-feed)
-            };
+            });
         }
 
-
         if (context === 'saved-list') {
-            card.classList.add('saved-paper-card');
             const addButton = document.createElement('button');
             addButton.className = 'add-to-builder';
             addButton.textContent = 'Add →';
-            addButton.onclick = () => addPaperToBuilder(paper.id);
+            addButton.onclick = (e) => { e.stopPropagation(); addPaperToBuilder(paper.id); };
             actions.appendChild(addButton);
         }
 
         if (context === 'builder-list') {
-            card.classList.add('builder-card');
             const upButton = document.createElement('button');
             upButton.className = 'reorder-up';
             upButton.textContent = '↑';
-            upButton.onclick = () => moveBuilderItem(paper.id, -1);
+            upButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(paper.id, -1); };
             actions.appendChild(upButton);
 
             const downButton = document.createElement('button');
             downButton.className = 'reorder-down';
             downButton.textContent = '↓';
-            downButton.onclick = () => moveBuilderItem(paper.id, 1);
+            downButton.onclick = (e) => { e.stopPropagation(); moveBuilderItem(paper.id, 1); };
             actions.appendChild(downButton);
 
             const removeButton = document.createElement('button');
             removeButton.className = 'remove-from-builder';
             removeButton.textContent = '×';
-            removeButton.onclick = () => removePaperFromBuilder(paper.id);
+            removeButton.onclick = (e) => { e.stopPropagation(); removePaperFromBuilder(paper.id); };
             actions.appendChild(removeButton);
         }
-
         card.appendChild(actions);
         return card;
     }
 
-    function renderExploreFeed() {
-        exploreFeedColumn.innerHTML = '<h3>Explore Feed</h3>'; // Clear previous
-        const papersToDisplay = allDemoPapers.slice(0, currentlyDisplayedExplorePapersCount);
-
-        if (papersToDisplay.length === 0) {
-            exploreFeedColumn.innerHTML += '<div class="placeholder">No papers to show.</div>';
+    function renderColumn(columnElement, title, items, cardCreatorFn, context, placeholderText) {
+        columnElement.innerHTML = `<h3>${title}</h3>`;
+        if (!items || items.length === 0) {
+            columnElement.innerHTML += `<div class="placeholder">${placeholderText}</div>`;
             return;
         }
-        papersToDisplay.forEach(paper => {
-            exploreFeedColumn.appendChild(createPaperCard(paper, 'explore-feed'));
-        });
-        if (currentlyDisplayedExplorePapersCount < allDemoPapers.length) {
-             exploreFeedColumn.innerHTML += '<div class="placeholder">Scroll to load more...</div>';
-        } else {
-            exploreFeedColumn.innerHTML += '<div class="placeholder">All papers loaded.</div>';
+        items.forEach(item => columnElement.appendChild(cardCreatorFn(item, context)));
+    }
+
+    function renderExploreFeed() {
+        const feedContainer = exploreFeedColumn; // Direct reference
+        feedContainer.innerHTML = '<h3>Explore Feed</h3>'; // Clear previous, keep header
+
+        if (!allPapersData || allPapersData.length === 0) {
+             feedContainer.innerHTML += '<div class="placeholder">No papers loaded. Check papers.json.</div>'; return;
+        }
+        const papersToDisplay = allPapersData.slice(0, currentlyDisplayedExplorePapersCount);
+        if (papersToDisplay.length === 0) {
+             feedContainer.innerHTML += '<div class="placeholder">No papers to display.</div>'; return;
+        }
+        papersToDisplay.forEach(paper => feedContainer.appendChild(createPaperCard(paper, 'explore-feed')));
+
+        if (currentlyDisplayedExplorePapersCount < allPapersData.length) {
+            const loadMorePlaceholder = document.createElement('div');
+            loadMorePlaceholder.className = 'placeholder';
+            loadMorePlaceholder.textContent = 'Scroll to load more...';
+            feedContainer.appendChild(loadMorePlaceholder);
+        } else if (allPapersData.length > 0) {
+            const allLoadedPlaceholder = document.createElement('div');
+            allLoadedPlaceholder.className = 'placeholder';
+            allLoadedPlaceholder.textContent = 'All papers loaded.';
+            feedContainer.appendChild(allLoadedPlaceholder);
         }
     }
 
     function renderPassages() {
         explorePassageColumn.innerHTML = '<h3>Paper Passages</h3>';
-        if (!currentPaperForPassages) {
-            explorePassageColumn.innerHTML += '<div class="placeholder">Click a paper on the left to see its passages.</div>';
-            return;
+        if (!currentPaperForPassagesId) {
+            explorePassageColumn.innerHTML += '<div class="placeholder">Click a paper on the left to see its passages.</div>'; return;
         }
-        const paper = allDemoPapers.find(p => p.id === currentPaperForPassages) || savedPaperIds.map(id => allDemoPapers.find(p => p.id === id)).find(p => p && p.id === currentPaperForPassages); // Check demo or saved
+        const paper = allPapersData.find(p => p.id === currentPaperForPassagesId);
         if (!paper) {
-            explorePassageColumn.innerHTML += '<div class="placeholder">Paper not found.</div>';
-            return;
+            explorePassageColumn.innerHTML += `<div class="placeholder">Paper (ID: ${currentPaperForPassagesId}) not found.</div>`; return;
         }
+        const textToSplit = paper.fullText || paper.abstract || "";
+        const sentences = textToSplit.match(/[^.!?]+[.!?]+/g) || (textToSplit.trim() ? [textToSplit.trim()] : []);
 
-        // Simple sentence splitting. A more robust NLP library would be better.
-        const sentences = paper.abstract.match(/[^.!?]+[.!?]+/g) || [paper.abstract];
         if (sentences.length === 0) {
-            explorePassageColumn.innerHTML += '<div class="placeholder">No passages found in abstract.</div>';
-            return;
+            explorePassageColumn.innerHTML += '<div class="placeholder">No passages found in this paper\'s text.</div>'; return;
         }
-
-        sentences.forEach((sentence, index) => {
+        sentences.forEach(sentence => {
+            const trimmedSentence = sentence.trim();
+            if (!trimmedSentence) return;
             const passageCard = document.createElement('article');
             passageCard.className = 'card passage-card';
-            passageCard.dataset.passageId = `passage_${paper.id}_${index}`;
-            passageCard.textContent = sentence.trim();
-            passageCard.onclick = () => {
-                currentPassageForRelated = sentence.trim();
-                refreshAll();
-            };
+            passageCard.textContent = trimmedSentence;
+            passageCard.onclick = () => { currentPassageTextForRelated = trimmedSentence; refreshAll(); };
             explorePassageColumn.appendChild(passageCard);
         });
     }
 
+    function getRelevantPapers(baseKeywords, excludeIds, count) {
+        const candidates = allPapersData.filter(p => !excludeIds.includes(p.id));
+        if (candidates.length === 0) return [];
+
+        const scoredPapers = candidates.map(paper => {
+            let score = 0;
+            const paperText = `${paper.title} ${paper.abstract} ${(paper.keywords || []).join(" ")}`.toLowerCase();
+            baseKeywords.forEach(kw => {
+                if (paperText.includes(kw.toLowerCase())) score++;
+            });
+            // Bonus for direct keyword matches
+            (paper.keywords || []).forEach(pk => {
+                if (baseKeywords.some(bk => pk.toLowerCase().includes(bk.toLowerCase()))) score += 2;
+            });
+            return { paper, score };
+        }).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
+
+        let results = scoredPapers.map(item => item.paper);
+        
+        // Fill with random if not enough scored results
+        if (results.length < count) {
+            const currentResultIds = results.map(r => r.id);
+            const randomFill = candidates.filter(p => !currentResultIds.includes(p.id));
+            let i = 0;
+            while(results.length < count && i < randomFill.length) {
+                results.push(randomFill[i]);
+                i++;
+            }
+        }
+        return results.slice(0, count);
+    }
+
     function renderRelatedPapers() {
         exploreRelatedColumn.innerHTML = '<h3>Related Papers</h3>';
-        if (!currentPassageForRelated) {
-            exploreRelatedColumn.innerHTML += '<div class="placeholder">Click a passage in the middle to see related papers.</div>';
-            return;
+        if (!currentPassageTextForRelated) {
+            exploreRelatedColumn.innerHTML += '<div class="placeholder">Click a passage to see related papers.</div>'; return;
         }
-
-        // Simulate related papers: show 10 random demo papers (excluding current one if it's in demo)
-        const related = [];
-        const numRelated = 10;
-        const availablePapers = allDemoPapers.filter(p => p.id !== currentPaperForPassages);
-
-        for (let i = 0; i < numRelated && availablePapers.length > 0; i++) {
-            const randomIndex = Math.floor(Math.random() * availablePapers.length);
-            related.push(availablePapers.splice(randomIndex, 1)[0]); // Add and remove to avoid duplicates
-        }
-        if (related.length === 0) {
-             exploreRelatedColumn.innerHTML += '<div class="placeholder">No related papers found (demo).</div>';
-             return;
-        }
-        related.forEach(paper => {
-            exploreRelatedColumn.appendChild(createPaperCard(paper, 'explore-related'));
-        });
+        const passageKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0, 5);
+        const relatedPapers = getRelevantPapers(passageKeywords, [currentPaperForPassagesId], 10);
+        renderColumn(exploreRelatedColumn, 'Related Papers', relatedPapers, createPaperCard, 'explore-related', 'No related papers found for this passage.');
     }
 
     function renderSavedPapersList() {
-        savedPapersColumn.innerHTML = '<h3>Saved Papers</h3>';
-        if (savedPaperIds.length === 0) {
-            savedPapersColumn.innerHTML += '<div class="placeholder">No papers saved yet.</div>';
-            return;
-        }
-        // Render in chronological order (reverse of how they were saved for "newest first")
-        // Or, for now, just the order in savedPaperIds
-        const savedPapers = savedPaperIds.map(id => allDemoPapers.find(p => p.id === id)).filter(p => p); // Get full paper objects
-
-        savedPapers.forEach(paper => {
-            savedPapersColumn.appendChild(createPaperCard(paper, 'saved-list'));
-        });
+        const papers = savedPaperIds.map(id => allPapersData.find(p => p.id === id)).filter(Boolean);
+        renderColumn(savedPapersColumn, 'Saved Papers', papers, createPaperCard, 'saved-list', 'No papers saved yet.');
     }
 
     function renderBuilderList() {
-        savedBuilderColumn.innerHTML = '<h3>Builder</h3>';
-        if (builderPaperIds.length === 0) {
-            savedBuilderColumn.innerHTML += '<div class="placeholder">Add papers from your saved list to the builder.</div>';
-            return;
-        }
-        const builderPapers = builderPaperIds.map(id => allDemoPapers.find(p => p.id === id)).filter(p => p);
-
-        builderPapers.forEach(paper => {
-            savedBuilderColumn.appendChild(createPaperCard(paper, 'builder-list'));
-        });
-        // Trigger suggestion refresh
-        renderLiveSuggestions();
+        const papers = builderPaperIds.map(id => allPapersData.find(p => p.id === id)).filter(Boolean);
+        renderColumn(savedBuilderColumn, 'Builder', papers, createPaperCard, 'builder-list', 'Add papers from your saved list.');
+        renderLiveSuggestions(); // Update suggestions when builder changes
     }
 
     function renderLiveSuggestions() {
         savedSuggestionsColumn.innerHTML = '<h3>Live Suggestions</h3>';
-        if (builderPaperIds.length === 0) {
-            savedSuggestionsColumn.innerHTML += '<div class="placeholder">Suggestions will appear here based on your builder list.</div>';
-            return;
+        let suggestionKeywords = [];
+        if (builderPaperIds.length > 0) {
+            const lastBuilderPaperId = builderPaperIds[builderPaperIds.length - 1];
+            const lastPaper = allPapersData.find(p => p.id === lastBuilderPaperId);
+            if (lastPaper) {
+                suggestionKeywords.push(...(lastPaper.keywords || []));
+                suggestionKeywords.push(...lastPaper.title.toLowerCase().split(/\s+/).filter(kw => kw.length > 3));
+            }
+        } else { // If builder is empty, maybe use current passage if in explore?
+             if (activeTab === 'explore' && currentPassageTextForRelated) {
+                 suggestionKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0,5);
+             } else {
+                savedSuggestionsColumn.innerHTML += '<div class="placeholder">Add to builder or explore passages for suggestions.</div>'; return;
+             }
         }
-        // Simulate suggestions: show 5 random demo papers not in builder or already saved
-        const suggestions = [];
-        const numSuggestions = 5;
-        const availablePapers = allDemoPapers.filter(p => !builderPaperIds.includes(p.id) && !savedPaperIds.includes(p.id));
+        if(suggestionKeywords.length === 0) {
+             savedSuggestionsColumn.innerHTML += '<div class="placeholder">Not enough context for suggestions.</div>'; return;
+        }
 
-        for (let i = 0; i < numSuggestions && availablePapers.length > 0; i++) {
-            const randomIndex = Math.floor(Math.random() * availablePapers.length);
-            suggestions.push(availablePapers.splice(randomIndex, 1)[0]);
-        }
-         if (suggestions.length === 0) {
-             savedSuggestionsColumn.innerHTML += '<div class="placeholder">No new suggestions found (demo).</div>';
-             return;
-        }
-        suggestions.forEach(paper => {
-            savedSuggestionsColumn.appendChild(createPaperCard(paper, 'saved-suggestions'));
-        });
+        const excludeIds = [...savedPaperIds, ...builderPaperIds, currentPaperForPassagesId].filter(Boolean);
+        const suggestedPapers = getRelevantPapers([...new Set(suggestionKeywords)], excludeIds, 5);
+        renderColumn(savedSuggestionsColumn, 'Live Suggestions', suggestedPapers, createPaperCard, 'saved-suggestion', 'No new suggestions found.');
     }
 
-
     // --- STATE MUTATION & ACTIONS ---
+    function updateLocalStorage() {
+        localStorage.setItem('paperPinSavedIds', JSON.stringify(savedPaperIds));
+        localStorage.setItem('paperPinBuilderIds', JSON.stringify(builderPaperIds));
+    }
+
     function toggleSavePaper(paperId) {
         const index = savedPaperIds.indexOf(paperId);
         if (index > -1) {
             savedPaperIds.splice(index, 1);
-            // If un-saving, also remove from builder
-            const builderIndex = builderPaperIds.indexOf(paperId);
-            if (builderIndex > -1) {
-                builderPaperIds.splice(builderIndex, 1);
-            }
+            const builderIndex = builderPaperIds.indexOf(paperId); // Also remove from builder if unsaved
+            if (builderIndex > -1) builderPaperIds.splice(builderIndex, 1);
         } else {
             savedPaperIds.push(paperId);
         }
-        localStorage.setItem('paperPinSavedIds', JSON.stringify(savedPaperIds));
+        updateLocalStorage();
         refreshAll();
     }
 
     function addPaperToBuilder(paperId) {
         if (!builderPaperIds.includes(paperId)) {
             builderPaperIds.push(paperId);
-            refreshAll(); // This will call renderBuilderList which calls renderLiveSuggestions
+            updateLocalStorage();
+            refreshAll();
         }
     }
 
@@ -306,46 +285,41 @@ document.addEventListener('DOMContentLoaded', () => {
         const index = builderPaperIds.indexOf(paperId);
         if (index > -1) {
             builderPaperIds.splice(index, 1);
+            updateLocalStorage();
             refreshAll();
         }
     }
 
-    function moveBuilderItem(paperId, direction) { // direction: -1 for up, 1 for down
+    function moveBuilderItem(paperId, direction) {
         const index = builderPaperIds.indexOf(paperId);
         if (index === -1) return;
-
         const newIndex = index + direction;
-        if (newIndex < 0 || newIndex >= builderPaperIds.length) return; // Out of bounds
-
-        // Swap elements
-        const temp = builderPaperIds[index];
-        builderPaperIds[index] = builderPaperIds[newIndex];
-        builderPaperIds[newIndex] = temp;
+        if (newIndex < 0 || newIndex >= builderPaperIds.length) return;
+        [builderPaperIds[index], builderPaperIds[newIndex]] = [builderPaperIds[newIndex], builderPaperIds[index]]; // Swap
+        updateLocalStorage();
         refreshAll();
     }
 
     function loadMoreExplorePapers() {
-        currentlyDisplayedExplorePapersCount = Math.min(allDemoPapers.length, currentlyDisplayedExplorePapersCount + papersPerLoad);
+        if (currentlyDisplayedExplorePapersCount >= allPapersData.length) return;
+        currentlyDisplayedExplorePapersCount = Math.min(allPapersData.length, currentlyDisplayedExplorePapersCount + papersPerLoad);
         renderExploreFeed(); // Only re-render the feed
     }
 
     // --- TAB SWITCHING ---
-    function switchTab(tabName) {
+    function switchTab(tabName, initialPaperIdForExplore = null) {
         activeTab = tabName;
-        if (tabName === 'explore') {
-            exploreView.style.display = 'flex';
-            savedView.style.display = 'none';
-            exploreTabButton.classList.add('active');
-            savedTabButton.classList.remove('active');
-        } else { // 'saved'
-            exploreView.style.display = 'none';
-            savedView.style.display = 'flex';
-            exploreTabButton.classList.remove('active');
-            savedTabButton.classList.add('active');
+        exploreView.style.display = (tabName === 'explore') ? 'flex' : 'none';
+        savedView.style.display = (tabName === 'saved') ? 'flex' : 'none';
+        exploreTabButton.classList.toggle('active', tabName === 'explore');
+        savedTabButton.classList.toggle('active', tabName === 'saved');
+
+        currentPassageTextForRelated = null; // Reset context
+        if (tabName === 'explore' && initialPaperIdForExplore) {
+            currentPaperForPassagesId = initialPaperIdForExplore;
+        } else {
+            currentPaperForPassagesId = null;
         }
-        // Reset selections when switching tabs to avoid confusion
-        currentPaperForPassages = null;
-        currentPassageForRelated = null;
         refreshAll();
     }
 
@@ -357,8 +331,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderRelatedPapers();
         } else { // 'saved'
             renderSavedPapersList();
-            renderBuilderList(); // This will also trigger renderLiveSuggestions
-            // renderLiveSuggestions(); // Called by renderBuilderList
+            renderBuilderList(); // Includes call to renderLiveSuggestions
         }
     }
 
@@ -366,20 +339,22 @@ document.addEventListener('DOMContentLoaded', () => {
     exploreTabButton.onclick = () => switchTab('explore');
     savedTabButton.onclick = () => switchTab('saved');
 
-    // Infinite scroll for explore feed
-    exploreFeedColumn.onscroll = () => {
-        if (activeTab === 'explore') {
-            // Check if scrolled to near bottom
-            if (exploreFeedColumn.scrollTop + exploreFeedColumn.clientHeight >= exploreFeedColumn.scrollHeight - 100) {
-                if (currentlyDisplayedExplorePapersCount < allDemoPapers.length) {
-                    loadMoreExplorePapers();
-                }
+    exploreFeedColumn.addEventListener('scroll', () => {
+        if (activeTab === 'explore' && exploreFeedColumn.scrollTop + exploreFeedColumn.clientHeight >= exploreFeedColumn.scrollHeight - 150) {
+            if (currentlyDisplayedExplorePapersCount < allPapersData.length) {
+                loadMoreExplorePapers();
             }
         }
-    };
+    });
 
     // --- INITIALIZATION ---
-    initializeDemoPapers(100); // Generate 100 demo papers
-    loadMoreExplorePapers();   // Load initial set for explore feed
-    switchTab('explore');      // Set initial tab and render
+    async function initializeApp() {
+        await loadPaperData();
+        if (allPapersData && allPapersData.length > 0) {
+            currentlyDisplayedExplorePapersCount = Math.min(allPapersData.length, papersPerLoad);
+        }
+        switchTab('explore'); // Default to explore tab
+    }
+
+    initializeApp();
 });
