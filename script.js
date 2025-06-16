@@ -508,6 +508,3 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     initializeApp();
 });
-
-    initializeApp();
-});
