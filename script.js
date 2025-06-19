@@ -24,6 +24,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const savedBuilderColumn = document.getElementById('savedBuilderColumn');
     const savedSuggestionsColumn = document.getElementById('savedSuggestionsColumn');
 
+    // New elements for Writing Panel
+    const nowWritingBar = document.getElementById('nowWritingBar');
+    const writingPanel = document.getElementById('writingPanel');
+    const closeWritingPanel = document.getElementById('closeWritingPanel');
+    const writingPanelContent = document.getElementById('writingPanelContent');
+
+
     // --- UTILITY FUNCTIONS ---
     function isItemEqual(item1, item2) {
         if (!item1 || !item2 || item1.type !== item2.type) return false;
@@ -234,7 +241,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         const sentences = textToSplit.match(/[^.!?]+[.!?]+/g) || (textToSplit.trim() ? [textToSplit.trim()] : []);
 
         if (sentences.length === 0) {
-            explorePassageColumn.innerHTML += '<div class="placeholder">No passages found in this paper\'s text.</div>'; return;
+            explorePassageColumn.innerHTML += '<div class="placeholder">No passages found in this paper\\\'s text.</div>'; return;
         }
         sentences.forEach(sentence => {
             const trimmedSentence = sentence.trim();
@@ -275,7 +282,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!currentPassageTextForRelated) {
             exploreRelatedColumn.innerHTML += '<div class="placeholder">Click a passage to see related papers.</div>'; return;
         }
-        const passageKeywords = currentPassageTextForRelated.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0, 5);
+        const passageKeywords = currentPassageTextForRelated.toLowerCase().split(/\\s+/).filter(kw => kw.length > 3).slice(0, 5);
         const relatedPapers = getRelevantPapers(passageKeywords, [currentPaperForPassagesId], 10);
         // Reuse renderColumn with createPaperCard for full papers
         exploreRelatedColumn.innerHTML = '<h3>Related Papers</h3>'; // Clear before adding
@@ -377,12 +384,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const paper = allPapersData.find(p => p.id === contextItem.paperId);
                 if (paper) {
                     suggestionKeywords.push(...(paper.keywords || []));
-                    suggestionKeywords.push(...paper.title.toLowerCase().split(/\s+/).filter(kw => kw.length > 3));
+                    suggestionKeywords.push(...paper.title.toLowerCase().split(/\\s+/).filter(kw => kw.length > 3));
                 }
             } else if (contextItem.type === 'passage') {
-                suggestionKeywords.push(...contextItem.passageText.toLowerCase().split(/\s+/).filter(kw => kw.length > 3).slice(0,5));
+                suggestionKeywords.push(...contextItem.passageText.toLowerCase().split(/\\s+/).filter(kw => kw.length > 3).slice(0,5));
                  if(contextItem.sourceTitle) { // If we added sourceTitle to passage item
-                    suggestionKeywords.push(...contextItem.sourceTitle.toLowerCase().split(/\s+/).filter(kw => kw.length > 3));
+                    suggestionKeywords.push(...contextItem.sourceTitle.toLowerCase().split(/\\s+/).filter(kw => kw.length > 3));
                  }
             }
         }
@@ -401,6 +408,44 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
              suggestedPapers.forEach(paper => savedSuggestionsColumn.appendChild(createPaperCard(paper, 'saved-suggestion')));
         }
+    }
+
+    function renderWritingPanelContent() {
+        writingPanelContent.innerHTML = ''; // Clear previous content
+        if (builderItems.length === 0) {
+            writingPanelContent.innerHTML = '<div class="placeholder">Add items from your saved list to the builder.</div>';
+            return;
+        }
+        builderItems.forEach(item => {
+            if (item.type === 'paper') {
+                const paperData = allPapersData.find(p => p.id === item.paperId);
+                if (paperData) {
+                    writingPanelContent.appendChild(createPaperCard(paperData, 'builder-list', 'paper'));
+                }
+            } else if (item.type === 'passage') {
+                writingPanelContent.appendChild(createPassageSnippetCard(item, 'builder-list'));
+            }
+        });
+    }
+    
+    function updateNowWritingBarVisibility() {
+        if (builderItems.length > 0) {
+            nowWritingBar.style.display = 'block';
+        } else {
+            nowWritingBar.style.display = 'none';
+            if (writingPanel.classList.contains('open')) {
+                closePanel(); // Close panel if builder is emptied
+            }
+        }
+    }
+    
+    function openPanel() {
+        writingPanel.classList.add('open');
+        renderWritingPanelContent();
+    }
+    
+    function closePanel() {
+        writingPanel.classList.remove('open');
     }
 
     // --- STATE MUTATION & ACTIONS ---
@@ -474,7 +519,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     // --- `refreshAll()` ---
-    function refreshAll() { // Updated to call new render function
+    function refreshAll() { // Updated to call new render function and manage panel
         if (activeTab === 'explore') {
             renderExploreFeed();
             renderPassages();
@@ -483,11 +528,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             renderSavedItemsList(); // Changed from renderSavedPapersList
             renderBuilderList();
         }
+        // Always update the writing panel and bar
+        updateNowWritingBarVisibility();
+        if (writingPanel.classList.contains('open')) {
+            renderWritingPanelContent();
+        }
     }
 
     // --- EVENT LISTENERS --- (Same)
     exploreTabButton.onclick = () => switchTab('explore');
     savedTabButton.onclick = () => switchTab('saved');
+
+    // New Listeners for Writing Panel
+    nowWritingBar.addEventListener('click', openPanel);
+    closeWritingPanel.addEventListener('click', closePanel);
 
     exploreFeedColumn.addEventListener('scroll', () => {
         if (activeTab === 'explore' && exploreFeedColumn.scrollTop + exploreFeedColumn.clientHeight >= exploreFeedColumn.scrollHeight - 150) {
